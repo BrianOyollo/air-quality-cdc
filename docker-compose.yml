@@ -1,0 +1,154 @@
+
+services:
+
+  cassandra:
+    image: cassandra:latest
+    container_name: cassandra
+    ports:
+      - "9042:9042"
+    volumes:
+      - cassandra-data:/var/lib/cassandra
+
+  mongodb:
+    image: mongo:latest
+    restart: always
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin123
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--keyFile", "/etc/secrets/mongo-keyfile"]
+    volumes:
+      
+      # - ./mongodb:/docker-entrypoint-initdb.d
+      - ./src/mongodb-key/mongo-keyfile:/etc/secrets/mongo-keyfile
+      - ./src/mongodb/initiate-replica-set.js:/docker-entrypoint-initdb.d/initiate-replica-set.js
+      - ./src/mongodb/create-debzm-user.js:/docker-entrypoint-initdb.d/create-debzm-user.js
+      - mongo_data:/data/db
+
+  mongo-express:
+    image: mongo-express:latest
+    restart: always
+    container_name: mongo-express
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_URL: mongodb://admin:admin123@mongodb:27017/
+      ME_CONFIG_BASICAUTH_ENABLED: true
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: admin123
+    depends_on:
+      - mongodb
+
+  zookeeper:
+    image: debezium/zookeeper:2.7.3.Final
+    container_name: zookeeper
+    restart: always
+    environment:
+      SERVER_ID: 1         # unique ID for this Zookeeper server
+      SERVER_COUNT: 1      # total servers in the cluster (1 for standalone)
+      LOG_LEVEL: INFO      # optional, can be INFO, WARN, ERROR, DEBUG, TRACE
+    depends_on:
+      - mongodb
+    ports:
+      - "2181:2181"   # client port
+      - "2888:2888"   # quorum port
+      - "3888:3888"   # leader election port
+    volumes:
+      - zookeeper_data:/zookeeper/data
+      - zookeeper_txns:/zookeeper/txns
+      - zookeeper_logs:/zookeeper/logs
+      - zookeeper_conf:/zookeeper/conf
+
+  kafka:
+    image: debezium/kafka:2.7.3.Final
+    container_name: kafka
+    restart: always
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"       # Kafka broker port
+    environment:
+      BROKER_ID: 1                         # Unique ID for this broker
+      ZOOKEEPER_CONNECT: zookeeper:2181    # Zookeeper host:port
+      HOST_NAME: kafka                     # Hostname of the container
+      ADVERTISED_HOST_NAME: kafka          # Hostname advertised to clients
+      HEAP_OPTS: "-Xms512M -Xmx512M"       # JVM memory settings
+      LOG_LEVEL: INFO                      # Kafka log level
+    volumes:
+      - kafka_data:/kafka/data            # Persistent data for topics
+      - kafka_logs:/kafka/logs            # Kafka logs
+      - kafka_config:/kafka/config        # Broker config files
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    ports:
+      - "8082:8080" # mongo-express is already using 8081
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local-kafka-cluster
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    depends_on:
+      - kafka
+
+  debezium-kakfa-connect:
+    image: debezium/connect:2.7.3.Final
+    container_name: debezium-kakfa-connect
+    depends_on:
+      - kafka
+      - mongodb
+      - cassandra
+    ports:
+      - "8083:8083"
+    environment:
+      GROUP_ID: 1
+      CONFIG_STORAGE_TOPIC: connect_configs
+      OFFSET_STORAGE_TOPIC: connect_offsets
+      BOOTSTRAP_SERVERS: kafka:9092
+      HOST_NAME: "connect"  
+      ADVERTISED_HOST_NAME: "connect" 
+      ADVERTISED_PORT: "8083"   
+      OFFSET_FLUSH_INTERVAL_MS: "60000" 
+      OFFSET_FLUSH_TIMEOUT_MS: "5000"
+      SHUTDOWN_TIMEOUT: "10000" 
+      HEAP_OPTS: "-Xms512M -Xmx2G" 
+      LOG_LEVEL: "INFO"
+      KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      ENABLE_APICURIO_CONVERTERS: "false"
+      ENABLE_DEBEZIUM_SCRIPTING: "false"
+      KAFKA_CONNECT_PLUGINS_DIR: "/kafka/connect/, /kafka/connect/custom_plugins"
+
+    volumes:
+      - ./src/debezium-plugins:/kafka/connect/custom_plugins
+      - kafka-connect_logs:/kafka/logs     
+      - kafka-connect_config:/kafka/config       
+
+  weather_etl:
+    container_name: weather_etl
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./src/app:/app/src/app
+    environment:
+      MONGO_DB_URI: "mongodb://admin:admin123@mongodb:27017/?replicaSet=rs0&authSource=admin"
+    depends_on:
+      - mongodb
+      - zookeeper
+      - kafka
+      - debezium-kakfa-connect
+
+volumes:
+  cassandra-data:
+  mongo_data:
+  zookeeper_data:
+  zookeeper_txns:
+  zookeeper_logs:
+  zookeeper_conf:
+  kafka_data:
+  kafka_logs:
+  kafka_config:
+  kafka-connect_logs:
+  kafka-connect_config:
