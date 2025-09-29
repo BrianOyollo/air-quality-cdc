@@ -13,3 +13,4 @@ wheels/
 
 /src/mongodb-key/
 /src/*.notes
+/src/notes.md
