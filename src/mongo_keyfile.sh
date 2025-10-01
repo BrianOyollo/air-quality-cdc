@@ -4,7 +4,7 @@
 
 set -e  # exit on any error
 
-KEYFILE_DIR="./mongodb-key"
+KEYFILE_DIR="./src/mongodb-key"
 KEYFILE_PATH="$KEYFILE_DIR/mongo-keyfile"
 
 # 1. Create the directory if it doesn't exist
