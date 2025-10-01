@@ -1,6 +1,7 @@
 
 
 **Capstone Project: Real-Time Air Quality Data Pipeline**
+
 This project implements a real-time data pipeline for air quality metrics using **Change Data Capture (CDC)** techniques. The pipeline pulls air quality data from the **Open-Meteo API**, stores the raw data in **MongoDB**, and uses CDC to stream updates to a **Cassandra** database for efficient querying and historical analysis.
 
 Key components and technologies:
